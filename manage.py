@@ -1,76 +1,48 @@
-import requests  
-import datetime
+import config 
+import logging
 
-
-token = '1339433216:AAG2yVyCWeUYe-A0O-1hwvksvrM4xC3Epi8'
-
-class BotHandler:
-
-    def __init__(self, token):
-        self.token = token
-        self.api_url = f"https://api.telegram.org/bot{self.token}/"
-
-    def get_updates(self, offset=None, timeout=30):
-        method = 'getUpdates'
-        params = {'timeout': timeout, 'offset': offset}
-        resp = requests.get(self.api_url + method, params)
-        result_json = resp.json()['result']
-        return result_json
-
-    def send_message(self, chat_id, text):
-        params = {'chat_id': chat_id, 'text': text}
-        method = 'sendMessage'
-        resp = requests.post(self.api_url + method, params)
-        return resp
-
-    def get_last_update(self):
-        get_result = self.get_updates()
-
-        if len(get_result) > 0:
-            last_update = get_result[-1]
-        else:
-            last_update = get_result[len(get_result)]
-
-        return last_update
+from aiogram import Bot, Dispatcher, executor, types
+from sqlighter import SQLighter
 
 
 
-greet_bot = BotHandler(token)  
-greetings = ('здравствуй', 'привет', 'ку', 'здорово')  
-now = datetime.datetime.now()
+#Задаем уровень логов
+logging.basicConfig(level=logging.INFO)
 
 
-def main():  
-    new_offset = None
-    today = now.day
-    hour = now.hour
 
-    while True:
-        greet_bot.get_updates(new_offset)
+#и=Инициализируем бота
+bot = Bot(token=config.token)
+dp = Dispatcher(bot)
 
-        last_update = greet_bot.get_last_update()
+#Инициализируем базу данных
+db = SQLighter('botbd.db')
 
-        last_update_id = last_update['update_id']
-        last_chat_text = last_update['message']['text']
-        last_chat_id = last_update['message']['chat']['id']
-        last_chat_name = last_update['message']['chat']['first_name']
 
-        if last_chat_text.lower() in greetings and today == now.day and 6 <= hour < 12:
-            greet_bot.send_message(last_chat_id, 'Доброе утро, {}'.format(last_chat_name))
-            today += 1
+#Команда активации подписки
+@dp.message_handler(commands= ['subscribe'])
+async def subscribe(message: types.Message):
+    if (not db. subscriber_exists(message.from_user.id)):
+    #Если нет юзера, добавляем его
+        db.add_subscribers(message.from_user.id)
+    else:
+    #Если юзер уже есть, то просто обновляем статус подписки
+        db.update_subscription(message.from_user.id, True)
+    await message.answer('Вы успешно подписались на рассылку! \nЖдите! БУ га га!')
 
-        elif last_chat_text.lower() in greetings and today == now.day and 12 <= hour < 17:
-            greet_bot.send_message(last_chat_id, 'Добрый день, {}'.format(last_chat_name))
-            today += 1
+@dp.message_handler(commands = ['unsubscribe'])
+async def unsubscribe(message: types.Message):
+    if (not db. subscriber_exists(message.from_user.id)):
+    #Если нет юзера, добавляем с некативной подпиской(запоминаем его)
+        db.add_subscribers(message.from_user.id, False)
+        await message.answer("Вы и так не подписаны.")
+    else: 
+    #Если есть юзер, то обновляем его статус
+        db.update_subscription(message.from_user.id, False)
+        await message.answer("Вы успешно отписались от рассылки.")
 
-        elif last_chat_text.lower() in greetings and today == now.day and 17 <= hour < 23:
-            greet_bot.send_message(last_chat_id, 'Добрый вечер, {}'.format(last_chat_name))
-            today += 1
 
-        new_offset = last_update_id + 1
+#Запускаем лонг поллинг
 
 if __name__ == '__main__':  
-    try:
-        main()
-    except KeyboardInterrupt:
-        exit()
+    executor.start_polling(dp, skip_updates=True)
